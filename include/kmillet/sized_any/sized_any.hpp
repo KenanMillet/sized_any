@@ -13,12 +13,12 @@
  * @section Usage
  * @code
  * kmillet::sized_any<16> a = 42; // stores an int in-place without heap allocation since sizeof(int) <= 16
- * int value = kmillet::any_cast<int>(a); // access the int value or throws bad_any_cast if type does not match
+ * int value = kmillet::any_cast<int>(a); // access the int value or throws std::bad_any_cast if type does not match
  * std::string& a_ref = a.emplace<std::string>("hello"); // will likely dynamic-allocate since sizeof(std::string) > 16 on most platforms
  * auto b = kmillet::make_sized_any<64, std::vector<int>>({1, 2, 3}); // b is a kmillet::sized_any<64> holding a std::vector<int> with 3 elements
  * auto* b_ptr = kmillet::any_cast<std::vector<int>>(&b); // safely access the vector as a pointer
  * auto c = kmillet::make_sized_any<std::string>("world"); // c is a kmillet::sized_any<sizeof(std::string)>
- * auto& c_ref = kmillet::any_cast<std::string&>(c); // access the string by reference or throws bad_any_cast if type does not match
+ * auto& c_ref = kmillet::any_cast<std::string&>(c); // access the string by reference or throws std::bad_any_cast if type does not match
  * c.reset(); // destroys the contained string
  * kmillet::any d; // kmillet::any has the same in-place storage capacity as std::any
  * d = kmillet::make_any<std::string>("example"); // will dynamic-allocate if std::make_any<std::string> would
@@ -44,17 +44,13 @@ namespace kmillet
 {
     template <std::size_t N> class sized_any;
 
-    using std::in_place_type_t;
-    using std::in_place_type;
-    using std::bad_any_cast;
-
     namespace sized_any_detail
     {
         template<class T> struct is_sized_any : std::false_type {};
         template<std::size_t N> struct is_sized_any<sized_any<N>> : std::true_type {};
 
         template<class T> struct is_in_place_type : std::false_type {};
-        template<class T> struct is_in_place_type<in_place_type_t<T>> : std::true_type {};
+        template<class T> struct is_in_place_type<std::in_place_type_t<T>> : std::true_type {};
 
         struct ITypeInfo;
         template<class T> struct TypeInfo;
@@ -66,6 +62,8 @@ namespace kmillet
      *        `kmillet::sized_any<N>` will not perform dynamic allocation to hold an object of type `std::decay_t<T>`.
      *
      * This means that `sizeof(std::decay_t<T>) <= N` and `std::is_nothrow_move_constructible_v<std::decay_t<T>>` is true.
+     * @tparam T The type to check.
+     * @tparam N The size of the buffer.
      */
     template<class T, std::size_t N>
     concept sized_any_optimized = !sized_any_detail::info<std::decay_t<T>>.needsAlloc(N);
@@ -82,6 +80,7 @@ namespace kmillet
      * - `kmillet::make_any` functions are provided as a direct replacement of `std::make_any`.
      *
      * See documentation below for usage and design details.
+     * @tparam N The size of the buffer used for in-place storage.
      */
     template<std::size_t N>
     class sized_any
@@ -95,19 +94,23 @@ namespace kmillet
         constexpr sized_any() noexcept;
         /**
          * @brief Copies the content of `other` into a new instance.
+         * @param other The `kmillet::sized_any<N>` to copy.
          * @details No dynamic allocation will occur if the content of `other` satisfies `kmillet::sized_any_optimized<N>`.
          */
         sized_any(const sized_any& other);
         /**
          * @brief Copies the content of `other` into a new instance.
+         * @tparam M The size of the buffer used by `other`.
+         * @param other The `kmillet::sized_any<M>` to copy.
          * @details No dynamic allocation will occur if the content of `other` satisfies `kmillet::sized_any_optimized<N>`.
          */
         template<std::size_t M>
         sized_any(const sized_any<M>& other);
         /**
          * @brief Moves the content of `other` into a new instance.
+         * @param other The `kmillet::sized_any<N>` to move.
          * @details Unlike `std::any`, which leaves `other` in a valid but unspecified state after the move,
-         * this implementation leaves `other` in a state that is equivalent to an empty `sized_any<N>`.
+         * this implementation leaves `other` in a state that is equivalent to an empty `kmillet::sized_any<N>`.
          * No dynamic allocation will occur.
          * If the content of `other` satisfies `kmillet::sized_any_optimized<N>`, then it will be moved into the buffer of this instance.
          * Otherwise, the pointer held by `other` that is pointing to the heap will be moved into this instance.
@@ -115,8 +118,10 @@ namespace kmillet
         sized_any(sized_any&& other) noexcept;
         /**
          * @brief Moves the content of `other` into a new instance.
+         * @tparam M The size of the buffer used by `other`.
+         * @param other The `kmillet::sized_any<M>` to move.
          * @details Unlike `std::any`, which leaves `other` in a valid but unspecified state after the move,
-         * this implementation leaves `other` in a state that is equivalent to an empty `sized_any<M>`.
+         * this implementation leaves `other` in a state that is equivalent to an empty `kmillet::sized_any<M>`.
          * Dynamic allocation will occur if and only if the content of `other` does not satisfy `kmillet::sized_any_optimized<N>`, but it does satisfy `kmillet::sized_any_optimized<M>`.
          * This means that if `M < N`, then no dynamic allocation will occur.
          */
@@ -124,7 +129,9 @@ namespace kmillet
         sized_any(sized_any<M>&& other) noexcept(M < N);
         /**
          * @brief Constructs an object with initial content of type `std::decay_t<ValueType>`, direct-initialized from `std::forward<ValueType>(value)`.
-         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `in_place_type_t`, and is copy-constructible.
+         * @tparam ValueType The type of the value to be stored.
+         * @param value The value to be stored.
+         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `std::in_place_type_t`, and is copy-constructible.
          * Noexcept so long as constructing `std::decay_t<ValueType>` from `std::forward<ValueType>(value)` is noexcept and `kmillet::sized_any_optimized<ValueType, N>` is satisfied.
          */
         template<class ValueType>
@@ -132,20 +139,28 @@ namespace kmillet
         sized_any(ValueType&& value) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, ValueType> && sized_any_optimized<ValueType, N>);
         /**
          * @brief Constructs an object with initial content of type `std::decay_t<ValueType>`, direct-non-list-initialized from `std::forward<Args>(args)...`.
+         * @tparam ValueType The type of the value to be stored.
+         * @tparam Args The types of the arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
+         * @param args The arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
          * @details Requires that `std::decay_t<ValueType>` is copy-constructible and constructible from `std::forward<Args>(args)...`.
          * Noexcept so long as constructing `std::decay_t<ValueType>` direct-non-list-initialized from `std::forward<Args>(args)...` is noexcept and `kmillet::sized_any_optimized<ValueType, N>` is satisfied.
          */
         template<class ValueType, class... Args>
         requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, Args...>)
-        explicit sized_any(in_place_type_t<ValueType>, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, Args...> && sized_any_optimized<ValueType, N>);
+        explicit sized_any(std::in_place_type_t<ValueType>, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, Args...> && sized_any_optimized<ValueType, N>);
         /**
          * @brief Constructs an object with initial content of type `std::decay_t<ValueType>`, direct-non-list-initialized from `il, std::forward<Args>(args)...`.
+         * @tparam ValueType The type of the value to be stored.
+         * @tparam U The type of the elements in the initializer list.
+         * @tparam Args The types of the arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
+         * @param il The initializer list to be used for constructing the object.
+         * @param args The arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
          * @details Requires that `std::decay_t<ValueType>` is copy-constructible and constructible from `il, std::forward<Args>(args)...`.
          * Noexcept so long as constructing `std::decay_t<ValueType>` direct-non-list-initialized from `il, std::forward<Args>(args)...` is noexcept and `kmillet::sized_any_optimized<ValueType, N>` is satisfied.
          */
         template<class ValueType, class U, class... Args>
         requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, std::initializer_list<U>&, Args...>)
-        explicit sized_any(in_place_type_t<ValueType>, std::initializer_list<U> il, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, std::initializer_list<U>&, Args...> && sized_any_optimized<ValueType, N>);
+        explicit sized_any(std::in_place_type_t<ValueType>, std::initializer_list<U> il, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, std::initializer_list<U>&, Args...> && sized_any_optimized<ValueType, N>);
 
         /**
          * @brief Destroys the contained object, if any, as if by a call to `reset()`.
@@ -153,32 +168,45 @@ namespace kmillet
         ~sized_any();
 
         /**
-         * @brief Assigns by copying the state of `rhs`, as if by `sized_any<N>(rhs).swap(*this)`.
+         * @brief Assigns by copying the state of `rhs`, as if by `kmillet::sized_any<N>(rhs).swap(*this)`.
+         * @param rhs The `kmillet::sized_any<N>` to copy.
+         * @return A reference to `*this`.
          */
         sized_any& operator=(const sized_any& rhs);
         /**
-         * @brief Assigns by copying the state of `rhs`, as if by `sized_any<N>(rhs).swap(*this)`.
+         * @brief Assigns by copying the state of `rhs`, as if by `kmillet::sized_any<N>(rhs).swap(*this)`.
+         * @tparam M The size of the buffer used by `rhs`.
+         * @param rhs The `kmillet::sized_any<M>` to copy.
+         * @return A reference to `*this`.
          */
         template<std::size_t M>
         sized_any& operator=(const sized_any<M>& rhs);
         /**
-         * @brief Assigns by moving the state of `rhs`, as if by `sized_any<N>(std::move(rhs)).swap(*this)`.
+         * @brief Assigns by moving the state of `rhs`, as if by `kmillet::sized_any<N>(std::move(rhs)).swap(*this)`.
+         * @param rhs The `kmillet::sized_any<N>` to move.
+         * @return A reference to `*this`.
          * @details Unlike `std::any`, which leaves `other` in a valid but unspecified state after the assignment,
-         * this implementation leaves `other` in a state that is equivalent to an empty `sized_any<N>`.
+         * this implementation leaves `other` in a state that is equivalent to an empty `kmillet::sized_any<N>`.
          */
         sized_any& operator=(sized_any&& rhs) noexcept;
         /**
-         * @brief Assigns by moving the state of `rhs`, as if by `sized_any<N>(std::move(rhs)).swap(*this)`.
+         * @brief Assigns by moving the state of `rhs`, as if by `kmillet::sized_any<N>(std::move(rhs)).swap(*this)`.
+         * @tparam M The size of the buffer used by `rhs`.
+         * @param rhs The `kmillet::sized_any<M>` to move.
+         * @return A reference to `*this`.
          * @details Unlike `std::any`, which leaves `other` in a valid but unspecified state after the assignment,
-         * this implementation leaves `other` in a state that is equivalent to an empty `sized_any<N>`.
+         * this implementation leaves `other` in a state that is equivalent to an empty `kmillet::sized_any<N>`.
          * Dynamic allocation will occur if and only if the content of `other` does not satisfy `kmillet::sized_any_optimized<N>`, but it does satisfy `kmillet::sized_any_optimized<M>`.
          * This means that if `M < N`, then no dynamic allocation will occur.
          */
         template<std::size_t M>
         sized_any& operator=(sized_any<M>&& rhs) noexcept(M < N);
         /**
-         * @brief Assigns the type and value of `rhs`, as if by `sized_any<N>(std::forward<ValueType>(rhs)).swap(*this)`.
-         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `in_place_type_t`, and is copy-constructible.
+         * @brief Assigns the type and value of `rhs`, as if by `kmillet::sized_any<N>(std::forward<ValueType>(rhs)).swap(*this)`.
+         * @tparam ValueType The type of the value to be assigned.
+         * @param rhs The value to be assigned.
+         * @return A reference to `*this`.
+         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `std::in_place_type_t`, and is copy-constructible.
          */
         template<class ValueType>
         requires(std::conjunction_v<std::negation<sized_any_detail::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
@@ -186,6 +214,10 @@ namespace kmillet
 
         /**
          * @brief Changes the contained object to one of type `std::decay_t<ValueType>` constructed from the arguments.
+         * @tparam ValueType The type of the value to be stored.
+         * @tparam Args The types of the arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
+         * @param args The arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
+         * @return A reference to the newly constructed object of type `std::decay_t<ValueType>`.
          * @details First, destroys the contained object, if any. Unlike `std::any`, which always deallocates heap storage on `emplace` by calling `reset()`,
          * this implementation may reuse existing heap-allocated storage if both the current and new contained types require allocation
          * and have the same size. This optimization improves performance but is a deliberate deviation from `std::any`'s strict behavior.
@@ -195,9 +227,15 @@ namespace kmillet
          */
         template<class ValueType, class... Args>
         requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, Args...>)
-        std::decay_t<ValueType>& emplace(Args&&... args) noexcept(noexcept(sized_any{in_place_type<ValueType>, std::forward<Args>(args)...}));
+        std::decay_t<ValueType>& emplace(Args&&... args) noexcept(noexcept(sized_any{std::in_place_type<ValueType>, std::forward<Args>(args)...}));
         /**
          * @brief Changes the contained object to one of type `std::decay_t<ValueType>` constructed from the arguments.
+         * @tparam ValueType The type of the value to be stored.
+         * @tparam U The type of the elements in the initializer list.
+         * @tparam Args The types of the arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
+         * @param il The initializer list to be used for constructing the object.
+         * @param args The arguments to be forwarded to the constructor of `std::decay_t<ValueType>`.
+         * @return A reference to the newly constructed object of type `std::decay_t<ValueType>`.
          * @details First, destroys the contained object, if any. Unlike `std::any`, which always deallocates heap storage on `emplace` by calling `reset()`,
          * this implementation may reuse existing heap-allocated storage if both the current and new contained types require allocation
          * and have the same size. This optimization improves performance but is a deliberate deviation from `std::any`'s strict behavior.
@@ -207,7 +245,7 @@ namespace kmillet
          */
         template<class ValueType, class U, class... Args>
         requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, std::initializer_list<U>&, Args...>)
-        std::decay_t<ValueType>& emplace(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(sized_any{in_place_type<ValueType>, il, std::forward<Args>(args)...}));
+        std::decay_t<ValueType>& emplace(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(sized_any{std::in_place_type<ValueType>, il, std::forward<Args>(args)...}));
 
         /**
          * @brief If `*this` contains a value, destroys the contained value.
@@ -216,24 +254,30 @@ namespace kmillet
         void reset() noexcept;
         /**
          * @brief Swaps the content of two `kmillet::sized_any<N>` objects.
+         * @param other The `kmillet::sized_any<N>` to swap with.
          */
         void swap(sized_any& other) noexcept;
         /**
          * @brief Swaps the content of a `kmillet::sized_any<N>` object with a `kmillet::sized_any<M>` object.
+         * @tparam M The size of the buffer used by `other`.
+         * @param other The `kmillet::sized_any<M>` to swap with.
          */
         template<std::size_t M>
         void swap(sized_any<M>& other);
 
         /**
-         * @brief Returns the size of the buffer used to hold the contained value.
+         * @brief Gets the in-place storage capacity of the `kmillet::sized_any<N>` instance.
+         * @return The size of the buffer (in bytes) used to hold the contained value, which is `N`.
          */
         [[nodiscard]] static constexpr std::size_t capacity() noexcept { return N; }
         /**
-         * @brief Returns `true` if and only if the instance contains a value.
+         * @brief Checks whether the object contains a value.
+         * @returns `true` if and only if the instance is non-empty, otherwise returns `false`.
          */
         [[nodiscard]] bool has_value() const noexcept;
         /**
-         * @brief Returns the `typeid` of the contained value if instance is non-empty, otherwise `typeid(void)`.
+         * @brief Queries the contained type.
+         * @returns The `type_info` of the contained value if instance is non-empty, otherwise `typeid(void)`.
          */
         [[nodiscard]] const std::type_info& type() const noexcept;
 
@@ -252,30 +296,50 @@ namespace kmillet
 
     /**
      * @brief Performs type-safe access to the contained object.
+     * @tparam T The type to which the contained object should be cast.
+     * @tparam N The size of the buffer used by `operand`.
+     * @param operand The `kmillet::sized_any<N>` to access.
+     * @exception `std::bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
+     * @return A reference to the object contained in `operand`, casted to type `T`.
      * @details The program is ill-formed if `std::is_constructible_v<T, const std::remove_cvref_t<T>&>` is `false`.
-     * Throws `bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
+     * Throws `std::bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
      * Otherwise, returns `static_cast<T>(*any_cast<std::remove_cvref_t<T>>(&operand))`.
      */
     template<class T, std::size_t N>
     T any_cast(const sized_any<N>& operand);
     /**
      * @brief Performs type-safe access to the contained object.
+     * @tparam T The type to which the contained object should be cast.
+     * @tparam N The size of the buffer used by `operand`.
+     * @param operand The `kmillet::sized_any<N>` to access.
+     * @exception `std::bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
+     * @return A reference to the object contained in `operand`, casted to type `T`.
      * @details The program is ill-formed if `std::is_constructible_v<T, std::remove_cvref_t<T>&>` is `false`.
-     * Throws `bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
+     * Throws `std::bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
      * Otherwise, returns `static_cast<T>(*any_cast<std::remove_cvref_t<T>>(&operand))`.
      */
     template<class T, std::size_t N>
     T any_cast(sized_any<N>& operand);
     /**
      * @brief Performs type-safe access to the contained object.
+     * @tparam T The type to which the contained object should be cast.
+     * @tparam N The size of the buffer used by `operand`.
+     * @param operand The `kmillet::sized_any<N>` to access.
+     * @exception `std::bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
+     * @return A reference to the object contained in `operand`, move-casted to type `T`.
      * @details The program is ill-formed if `std::is_constructible_v<T, std::remove_cvref_t<T>>` is `false`.
-     * Throws `bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
+     * Throws `std::bad_any_cast` if the `typeid` of the requested `T` does not match that of the contents of `operand`.
      * Otherwise, returns `static_cast<T>(std::move(*any_cast<std::remove_cvref_t<T>>(&operand)))`.
      */
     template<class T, std::size_t N>
     T any_cast(sized_any<N>&& operand);
     /**
      * @brief Performs type-safe access to the contained object.
+     * @tparam T The type to which the contained object should be cast.
+     * @tparam N The size of the buffer used by `operand`.
+     * @param operand The pointer to the `kmillet::sized_any<N>` to access.
+     * @return A pointer to the object contained in `operand`, casted to type `const T*` if `operand` is not a null pointer and the `typeid` of the
+     * requested `T` matches that of the contents of `operand`; otherwise returns a null pointer.
      * @details The program is ill-formed if `std::is_void_v<T>` is `true`.
      * If `operand` is not a null pointer and the `typeid` of the requested `T` matches that of the contents of `operand`,
      * returns a pointer to the value contained by `operand`; otherwise returns a null pointer.
@@ -284,6 +348,11 @@ namespace kmillet
     const T* any_cast(const sized_any<N>* operand) noexcept;
     /**
      * @brief Performs type-safe access to the contained object.
+     * @tparam T The type to which the contained object should be cast.
+     * @tparam N The size of the buffer used by `operand`.
+     * @param operand The pointer to the `kmillet::sized_any<N>` to access.
+     * @return A pointer to the object contained in `operand`, casted to type `T*` if `operand` is not a null pointer and the `typeid` of the
+     * requested `T` matches that of the contents of `operand`; otherwise returns a null pointer.
      * @details The program is ill-formed if `std::is_void_v<T>` is `true`.
      * If `operand` is not a null pointer and the `typeid` of the requested `T` matches that of the contents of `operand`,
      * returns a pointer to the value contained by `operand`; otherwise returns a null pointer.
@@ -293,47 +362,82 @@ namespace kmillet
 
     /**
      * @brief Constructs a `kmillet::sized_any<N>` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * @details Equivalent to `return kmillet::sized_any<N>(in_place_type<T>, std::forward<Args>(args)...);`
+     * @tparam N The size of the buffer used for in-place storage.
+     * @tparam T The type of the value to be stored.
+     * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
+     * @param args The arguments to be forwarded to the constructor of `T`.
+     * @return A `kmillet::sized_any<N>` object containing an object of type `T`, constructed with the provided arguments.
+     * @details Equivalent to `return kmillet::sized_any<N>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<std::size_t N, class T, class... Args>
-    sized_any<N> make_sized_any(Args&&... args) noexcept(noexcept(sized_any<N>{in_place_type<T>, std::forward<Args>(args)...}));
+    sized_any<N> make_sized_any(Args&&... args) noexcept(noexcept(sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...}));
     /**
      * @brief Constructs a `kmillet::sized_any<N>` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * @details Equivalent to `return kmillet::sized_any<N>(in_place_type<T>, il, std::forward<Args>(args)...);`
+     * @tparam N The size of the buffer used for in-place storage.
+     * @tparam T The type of the value to be stored.
+     * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
+     * @param il The initializer list to be used for constructing the object.
+     * @param args The arguments to be forwarded to the constructor of `T`.
+     * @return A `kmillet::sized_any<N>` object containing an object of type `T`, constructed with the provided arguments.
+     * @details Equivalent to `return kmillet::sized_any<N>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<std::size_t N, class T, class U, class... Args>
-    sized_any<N> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(sized_any<N>{in_place_type<T>, il, std::forward<Args>(args)...}));
+    sized_any<N> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...}));
 
     /**
-     * @brief Constructs a `kmillet::sized_any<sizeof(std::decay_t<T>)>` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(in_place_type<T>, std::forward<Args>(args)...);`
+     * @brief Constructs a `kmillet::sized_any` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
+     * The capacity of the constructed and returned `kmillet::sized_any` is exactly big enough to hold the `T` instance.
+     * @tparam T The type of the value to be stored.
+     * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
+     * @param args The arguments to be forwarded to the constructor of `T`.
+     * @return A `kmillet::sized_any<sizeof(std::decay_t<T>)>` object containing an object of type `T`, constructed with the provided arguments.
+     * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<class T, class... Args>
     sized_any<sizeof(std::decay_t<T>)> make_sized_any(Args&&... args) noexcept(noexcept(make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)));
     /**
-     * @brief Constructs a `kmillet::sized_any<sizeof(std::decay_t<T>)>` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(in_place_type<T>, il, std::forward<Args>(args)...);`
+     * @brief Constructs a `kmillet::sized_any` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
+     * The capacity of the constructed and returned `kmillet::sized_any` is exactly big enough to hold the `T` instance.
+     * @tparam T The type of the value to be stored.
+     * @tparam U The type of the elements in the initializer list.
+     * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
+     * @param il The initializer list to be used for constructing the object.
+     * @param args The arguments to be forwarded to the constructor of `T`.
+     * @return A `kmillet::sized_any<sizeof(std::decay_t<T>)>` object containing an object of type `T`, constructed with the provided arguments.
+     * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<class T, class U, class... Args>
     sized_any<sizeof(std::decay_t<T>)> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)));
 
     /**
-     * @brief `kmillet::any` is an alias for a `kmillet::sized_any<N>` where `N` is equal to the internal buffer size of `std::any`.
+     * @brief An alias for a `kmillet::sized_any<N>` where `N` is equal to the internal buffer size of `std::any`.
+     * For most practical purposes, it is intended to be identical to `std::any`.
      * @details Intended to be used as a direct replacement for `std::any`, providing a more efficient implementation with better control over memory usage
      * and compatibility with other specializations of `kmillet::sized_any`.
      */
     using any = sized_any<sizeof(std::any)-sizeof(void*)>;
     /**
-     * @brief `kmillet::make_any<T>` is an alias for `kmillet::make_sized_any<N, T>` where `N` is equal to the internal buffer size of `std::any`.
+     * @brief An alias for `kmillet::make_sized_any<N, T>` where `N` is equal to the internal buffer size of `std::any`.
+     * For most practical purposes, it is intended to be identical to `std::make_any` aside from the return type.
+     * @tparam T The type of the value to be stored.
+     * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
+     * @param args The arguments to be forwarded to the constructor of `T`.
+     * @return A `kmillet::any` object containing an object of type `T`, constructed with the provided arguments.
      * @details Intended to be used as a direct replacement for `std::make_any` where the desired return type is a `kmillet::any` instead of a `std::any`.
-     * Equivalent to `return kmillet::sized_any<kmillet::any::capacity()>(in_place_type<T>, std::forward<Args>(args)...);`
+     * Equivalent to `return kmillet::sized_any<kmillet::any::capacity()>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<class T, class... Args>
     any make_any(Args&&... args) noexcept(noexcept(make_sized_any<any::capacity(), T>(std::forward<Args>(args)...)));
     /**
      * @brief `kmillet::make_any<T>` is an alias for `kmillet::make_sized_any<N, T>` where `N` is equal to the internal buffer size of `std::any`.
+     * @tparam T The type of the value to be stored.
+     * @param U The type of the elements in the initializer list.
+     * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
+     * @param il The initializer list to be used for constructing the object.
+     * @param args The arguments to be forwarded to the constructor of `T`.
+     * @return A `kmillet::any` object containing an object of type `T`, constructed with the provided arguments.
      * @details Intended to be used as a direct replacement for `std::make_any` where the desired return type is a `kmillet::any` instead of a `std::any`.
-     * Equivalent to `return kmillet::sized_any<kmillet::any::capacity()>(in_place_type<T>, il, std::forward<Args>(args)...);`
+     * Equivalent to `return kmillet::sized_any<kmillet::any::capacity()>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<class T, class U, class... Args>
     any make_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(make_sized_any<any::capacity(), T>(il, std::forward<Args>(args)...)));
@@ -480,7 +584,7 @@ inline kmillet::sized_any<N>::sized_any(ValueType&& value) noexcept(std::is_noth
 template <std::size_t N>
 template <class ValueType, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, Args...>)
-inline kmillet::sized_any<N>::sized_any(in_place_type_t<ValueType>, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, Args...> && kmillet::sized_any_optimized<ValueType, N>)
+inline kmillet::sized_any<N>::sized_any(std::in_place_type_t<ValueType>, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, Args...> && kmillet::sized_any_optimized<ValueType, N>)
     : info(&(kmillet::sized_any_detail::info<std::decay_t<ValueType>>))
 {
     if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.needsAlloc(N))
@@ -492,7 +596,7 @@ inline kmillet::sized_any<N>::sized_any(in_place_type_t<ValueType>, Args&&... ar
 template <std::size_t N>
 template <class ValueType, class U, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, std::initializer_list<U>&, Args...>)
-inline kmillet::sized_any<N>::sized_any(in_place_type_t<ValueType>, std::initializer_list<U> il, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, std::initializer_list<U>&, Args...> && kmillet::sized_any_optimized<ValueType, N>)
+inline kmillet::sized_any<N>::sized_any(std::in_place_type_t<ValueType>, std::initializer_list<U> il, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, std::initializer_list<U>&, Args...> && kmillet::sized_any_optimized<ValueType, N>)
     : info(&(kmillet::sized_any_detail::info<std::decay_t<ValueType>>))
 {
     if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.needsAlloc(N))
@@ -548,7 +652,7 @@ inline kmillet::sized_any<N>& kmillet::sized_any<N>::operator=(ValueType&& rhs) 
 template <std::size_t N>
 template <class ValueType, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, Args...>)
-inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{in_place_type<ValueType>, std::forward<Args>(args)...}))
+inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<ValueType>, std::forward<Args>(args)...}))
 {
     if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.needsAlloc(N))
     {
@@ -576,7 +680,7 @@ inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(Args&&... args) n
 template <std::size_t N>
 template<class ValueType, class U, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, std::initializer_list<U>&, Args...>)
-inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{in_place_type<ValueType>, il, std::forward<Args>(args)...}))
+inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<ValueType>, il, std::forward<Args>(args)...}))
 {
     if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.needsAlloc(N))
     {
@@ -655,19 +759,19 @@ template <class T, std::size_t N>
 T kmillet::any_cast(const kmillet::sized_any<N>& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(*casted);
-    throw bad_any_cast{};
+    throw std::bad_any_cast{};
 }
 template <class T, std::size_t N>
 T kmillet::any_cast(kmillet::sized_any<N>& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(*casted);
-    throw bad_any_cast{};
+    throw std::bad_any_cast{};
 }
 template <class T, std::size_t N>
 T kmillet::any_cast(kmillet::sized_any<N>&& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(std::move(*casted));
-    throw bad_any_cast{};
+    throw std::bad_any_cast{};
 }
 template <class T, std::size_t N>
 const T* kmillet::any_cast(const kmillet::sized_any<N>* operand) noexcept
@@ -691,14 +795,14 @@ T* kmillet::any_cast(kmillet::sized_any<N>* operand) noexcept
 }
 
 template <std::size_t N, class T, class... Args>
-kmillet::sized_any<N> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{in_place_type<T>, std::forward<Args>(args)...}))
+kmillet::sized_any<N> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...}))
 {
-    return kmillet::sized_any<N>{in_place_type<T>, std::forward<Args>(args)...};
+    return kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...};
 }
 template <std::size_t N, class T, class U, class... Args>
-kmillet::sized_any<N> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{in_place_type<T>, il, std::forward<Args>(args)...}))
+kmillet::sized_any<N> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...}))
 {
-    return kmillet::sized_any<N>{in_place_type<T>, il, std::forward<Args>(args)...};
+    return kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...};
 }
 template<class T, class... Args>
 kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)))
