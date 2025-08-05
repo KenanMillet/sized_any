@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 /**
  * @file sized_any.hpp
  * @author Kenan Millet
@@ -38,6 +40,7 @@
 #include <any>
 #include <array>
 #include <concepts>
+#include <typeinfo>
 #include <cstddef>
 
 namespace kmillet
@@ -394,7 +397,7 @@ namespace kmillet
      * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<class T, class... Args>
-    sized_any<sizeof(std::decay_t<T>)> make_sized_any(Args&&... args) noexcept(noexcept(make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)));
+    sized_any<sizeof(std::decay_t<T>)> make_sized_any(Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)));
     /**
      * @brief Constructs a `kmillet::sized_any` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
      * The capacity of the constructed and returned `kmillet::sized_any` is exactly big enough to hold the `T` instance.
@@ -407,7 +410,7 @@ namespace kmillet
      * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<class T, class U, class... Args>
-    sized_any<sizeof(std::decay_t<T>)> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)));
+    sized_any<sizeof(std::decay_t<T>)> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)));
 
     /**
      * @brief An alias for a `kmillet::sized_any<N>` where `N` is equal to the internal buffer size of `std::any`.
@@ -427,7 +430,7 @@ namespace kmillet
      * Equivalent to `return kmillet::sized_any<kmillet::any::capacity()>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<class T, class... Args>
-    any make_any(Args&&... args) noexcept(noexcept(make_sized_any<any::capacity(), T>(std::forward<Args>(args)...)));
+    any make_any(Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<any::capacity(), T>(std::forward<Args>(args)...)));
     /**
      * @brief `kmillet::make_any<T>` is an alias for `kmillet::make_sized_any<N, T>` where `N` is equal to the internal buffer size of `std::any`.
      * @tparam T The type of the value to be stored.
@@ -440,7 +443,7 @@ namespace kmillet
      * Equivalent to `return kmillet::sized_any<kmillet::any::capacity()>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<class T, class U, class... Args>
-    any make_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(make_sized_any<any::capacity(), T>(il, std::forward<Args>(args)...)));
+    any make_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<any::capacity(), T>(il, std::forward<Args>(args)...)));
 }
 
 
@@ -485,7 +488,7 @@ struct kmillet::sized_any_detail::TypeInfo final : kmillet::sized_any_detail::IT
     {
         if (needsAlloc(fromCap))
         {
-            return **reinterpret_cast<const T**>(from);
+            return **reinterpret_cast<const T* const*>(from);
         }
         else return *reinterpret_cast<const T*>(from);
     }
