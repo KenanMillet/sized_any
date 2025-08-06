@@ -53,6 +53,12 @@ option(
     ${PROJECT_IS_TOP_LEVEL}
 )
 
+option(
+    KMILLET_SIZED_ANY_NO_VIRTUAL
+    "Disables virtual function calls by replacing internal abstract class with a function pointer table. Consider toggling this value if performance is below expectations. Default: OFF. Values: { ON, OFF }."
+    OFF
+)
+
 configure_file(
     include/kmillet/sized_any/config.hpp.in
     include/kmillet/sized_any/config.hpp
@@ -75,8 +81,12 @@ target_sources(
     kmillet.sized_any
     INTERFACE
         FILE_SET HEADERS
-        BASE_DIRS include
-        FILES include/kmillet/sized_any/sized_any.hpp
+        BASE_DIRS
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_BINARY_DIR}/include
+        FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/kmillet/sized_any/sized_any.hpp
+            ${CMAKE_CURRENT_BINARY_DIR}/include/kmillet/sized_any/config.hpp
 )
 
 include(GNUInstallDirs)

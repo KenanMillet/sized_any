@@ -47,6 +47,10 @@ function(kmillet_add_tests)
     endforeach()
 endfunction()
 
+kmillet_add_benchmark(
+    sized_any
+)
+
 kmillet_add_tests(
     sized_any
 )
