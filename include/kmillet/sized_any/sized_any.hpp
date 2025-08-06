@@ -43,6 +43,10 @@
 #include <typeinfo>
 #include <cstddef>
 
+#ifndef KMILLET_SIZED_ANY_NO_VIRTUAL
+#define KMILLET_SIZED_ANY_NO_VIRTUAL() 0
+#endif
+
 namespace kmillet
 {
     template <std::size_t N> class sized_any;
@@ -452,6 +456,18 @@ namespace kmillet
 // Implementation details below this point.
 // ----------------------------------------------------------------------------
 
+#if KMILLET_SIZED_ANY_NO_VIRTUAL()
+struct kmillet::sized_any_detail::ITypeInfo
+{
+    const std::type_info& (* const type) () noexcept;
+    std::size_t (* const size) () noexcept;
+    bool (* const needsAlloc) (std::size_t cap) noexcept;
+    void (* const copy) (const void* from, char* to, std::size_t fromCap, std::size_t toCap);
+    void (* const move) (void* from, char* to, std::size_t fromCap, std::size_t toCap);
+    void (* const destroy) (char* buff, std::size_t cap) noexcept;
+    void (* const del) (void* buff, std::size_t cap) noexcept;
+};
+#else
 struct kmillet::sized_any_detail::ITypeInfo
 {
     virtual constexpr const std::type_info& type() const noexcept = 0;
@@ -462,83 +478,151 @@ struct kmillet::sized_any_detail::ITypeInfo
     virtual void destroy(char* buff, std::size_t cap) const noexcept = 0;
     virtual void del(void* buff, std::size_t cap) const noexcept = 0;
 };
-
-template<>
-struct kmillet::sized_any_detail::TypeInfo<void> final : kmillet::sized_any_detail::ITypeInfo
-{
-    constexpr const std::type_info& type() const noexcept override { return typeid(void); }
-    constexpr std::size_t size() const noexcept override { return 0; }
-    constexpr bool needsAlloc(std::size_t) const noexcept override { return false; }
-    void copy(const void*, char*, std::size_t, std::size_t) const override{}
-    void move(void*, char*, std::size_t, std::size_t) const override {}
-    void destroy(char*, std::size_t) const noexcept override {}
-    void del(void*, std::size_t) const noexcept override {}
-};
+#endif
 
 template<class T>
 struct kmillet::sized_any_detail::TypeInfo final : kmillet::sized_any_detail::ITypeInfo
 {
-    constexpr const std::type_info& type() const noexcept override { return typeid(T); }
-    constexpr std::size_t size() const noexcept override { return sizeof(T); }
-    constexpr bool needsAlloc(std::size_t cap) const noexcept override
-    {
-        return sizeof(T) > cap || !std::is_nothrow_move_constructible_v<T>;
-    }
-    const T& getValueForCopying(const void* from, std::size_t fromCap) const
-    {
-        if (needsAlloc(fromCap))
-        {
-            return **reinterpret_cast<const T* const*>(from);
-        }
-        else return *reinterpret_cast<const T*>(from);
-    }
-    T& getValueForMoving(void* from, std::size_t fromCap) const
-    {
-        if (needsAlloc(fromCap))
-        {
-            return **reinterpret_cast<T**>(from);
-        }
-        else return *reinterpret_cast<T*>(from);
-    }
-    void copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap) const override
-    {
-        if (needsAlloc(toCap))
-        {
-            *reinterpret_cast<const void**>(to) = new T(getValueForCopying(from, fromCap));
-        }
-        else new (to) T(getValueForCopying(from, fromCap));
-    }
-    void move(void* from, char* to, std::size_t fromCap, std::size_t toCap) const override
-    {
-        if (needsAlloc(toCap))
-        {
-            if (needsAlloc(fromCap))
-            {
-                *reinterpret_cast<void**>(to) = *reinterpret_cast<void**>(from);
-                return;
-            }
-            else *reinterpret_cast<void**>(to) = new T(std::move(*reinterpret_cast<T*>(from)));
-        }
-        else new (to) T(std::move(getValueForMoving(from, fromCap)));
-        del(from, fromCap);
-    }
-    void destroy(char* buff, std::size_t cap) const noexcept override
-    {
-        if (needsAlloc(cap))
-        {
-            (*reinterpret_cast<T**>(buff))->~T();
-        }
-        else reinterpret_cast<T*>(buff)->~T();
-    }
-    void del(void* buff, std::size_t cap) const noexcept override
-    {
-        if (needsAlloc(cap))
-        {
-            delete *reinterpret_cast<T**>(buff);
-        }
-        else reinterpret_cast<T*>(buff)->~T();
-    }
+    static constexpr const std::type_info& Type() noexcept;
+    static constexpr std::size_t Size() noexcept;
+    static constexpr bool NeedsAlloc(std::size_t cap) noexcept;
+    static void Copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap);
+    static void Move(void* from, char* to, std::size_t fromCap, std::size_t toCap);
+    static void Destroy(char* buff, std::size_t cap) noexcept;
+    static void Del(void* buff, std::size_t cap) noexcept;
+#if KMILLET_SIZED_ANY_NO_VIRTUAL()
+    constexpr const std::type_info& type() const noexcept { return Type(); }
+    constexpr std::size_t size() const noexcept { return Size(); }
+    constexpr bool needsAlloc(std::size_t cap) const noexcept { return NeedsAlloc(cap); }
+    void copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap) const { Copy(from, to, fromCap, toCap); }
+    void move(void* from, char* to, std::size_t fromCap, std::size_t toCap) const { Move(from, to, fromCap, toCap); }
+    void destroy(char* buff, std::size_t cap) const noexcept { Destroy(buff, cap); }
+    void del(void* buff, std::size_t cap) const noexcept { Del(buff, cap); }
+    constexpr TypeInfo() noexcept
+        : ITypeInfo{.type=&Type,
+                    .size=&Size,
+                    .needsAlloc=&NeedsAlloc,
+                    .copy=&Copy,
+                    .move=&Move,
+                    .destroy=&Destroy,
+                    .del=&Del}
+    {}
+#else
+    constexpr const std::type_info& type() const noexcept override { return Type(); }
+    constexpr std::size_t size() const noexcept override { return Size(); }
+    constexpr bool needsAlloc(std::size_t cap) const noexcept override { return NeedsAlloc(cap); }
+    void copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap) const override { return Copy(from, to, fromCap, toCap); }
+    void move(void* from, char* to, std::size_t fromCap, std::size_t toCap) const override { return Move(from, to, fromCap, toCap); }
+    void destroy(char* buff, std::size_t cap) const noexcept override { return Destroy(buff, cap); }
+    void del(void* buff, std::size_t cap) const noexcept override { return Del(buff, cap); }
+#endif
 };
+
+template<>
+inline constexpr const std::type_info& kmillet::sized_any_detail::TypeInfo<void>::Type() noexcept
+{
+    return typeid(void);
+}
+template<>
+inline constexpr std::size_t kmillet::sized_any_detail::TypeInfo<void>::Size() noexcept
+{
+    return 0;
+}
+template<>
+inline constexpr bool kmillet::sized_any_detail::TypeInfo<void>::NeedsAlloc(std::size_t cap) noexcept
+{
+    return false;
+}
+template<>
+inline void kmillet::sized_any_detail::TypeInfo<void>::Copy(const void*, char*, std::size_t, std::size_t)
+{
+    // No operation needed for void type
+}
+template<>
+inline void kmillet::sized_any_detail::TypeInfo<void>::Move(void*, char*, std::size_t, std::size_t)
+{
+    // No operation needed for void type
+}
+template<>
+inline void kmillet::sized_any_detail::TypeInfo<void>::Destroy(char*, std::size_t) noexcept
+{
+    // No operation needed for void type
+}
+template<>
+inline void kmillet::sized_any_detail::TypeInfo<void>::Del(void*, std::size_t) noexcept
+{
+    // No operation needed for void type
+}
+
+template<class T>
+inline constexpr const std::type_info& kmillet::sized_any_detail::TypeInfo<T>::Type() noexcept
+{
+    return typeid(T);
+}
+template<class T>
+inline constexpr std::size_t kmillet::sized_any_detail::TypeInfo<T>::Size() noexcept
+{
+    return sizeof(T);
+}
+template<class T>
+inline constexpr bool kmillet::sized_any_detail::TypeInfo<T>::NeedsAlloc(std::size_t cap) noexcept
+{
+    return sizeof(T) > cap || !std::is_nothrow_move_constructible_v<T>;
+}
+template<class T>
+inline void kmillet::sized_any_detail::TypeInfo<T>::Copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap)
+{
+    if (NeedsAlloc(toCap))
+    {
+        if (NeedsAlloc(fromCap))
+        {
+            *reinterpret_cast<const void**>(to) = new T(**reinterpret_cast<const T* const*>(from));
+        }
+        else *reinterpret_cast<const void**>(to) = new T(*reinterpret_cast<const T*>(from));
+    }
+    else if (NeedsAlloc(fromCap))
+    {
+        new (to) T(**reinterpret_cast<const T* const*>(from));
+    }
+    else new (to) T(*reinterpret_cast<const T*>(from));
+}
+template<class T>
+inline void kmillet::sized_any_detail::TypeInfo<T>::Move(void* from, char* to, std::size_t fromCap, std::size_t toCap)
+{
+    if (NeedsAlloc(toCap))
+    {
+        if (NeedsAlloc(fromCap))
+        {
+            *reinterpret_cast<void**>(to) = *reinterpret_cast<void**>(from);
+            return;
+        }
+        else *reinterpret_cast<void**>(to) = new T(std::move(*reinterpret_cast<T*>(from)));
+    }
+    else if (NeedsAlloc(fromCap))
+    {
+        new (to) T(std::move(**reinterpret_cast<T**>(from)));
+    }
+    else new (to) T(std::move(*reinterpret_cast<T*>(from)));
+    Del(from, fromCap);
+}
+template<class T>
+inline void kmillet::sized_any_detail::TypeInfo<T>::Destroy(char* buff, std::size_t cap) noexcept
+{
+    if (NeedsAlloc(cap))
+    {
+        (*reinterpret_cast<T**>(buff))->~T();
+    }
+    else reinterpret_cast<T*>(buff)->~T();
+}
+template<class T>
+inline void kmillet::sized_any_detail::TypeInfo<T>::Del(void* buff, std::size_t cap) noexcept
+{
+    if (NeedsAlloc(cap))
+    {
+        delete *reinterpret_cast<T**>(buff);
+    }
+    else reinterpret_cast<T*>(buff)->~T();
+}
 
 template <std::size_t N>
 inline constexpr kmillet::sized_any<N>::sized_any() noexcept
@@ -759,25 +843,25 @@ inline const std::type_info& kmillet::sized_any<N>::type() const noexcept
 }
 
 template <class T, std::size_t N>
-T kmillet::any_cast(const kmillet::sized_any<N>& operand)
+inline T kmillet::any_cast(const kmillet::sized_any<N>& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(*casted);
     throw std::bad_any_cast{};
 }
 template <class T, std::size_t N>
-T kmillet::any_cast(kmillet::sized_any<N>& operand)
+inline T kmillet::any_cast(kmillet::sized_any<N>& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(*casted);
     throw std::bad_any_cast{};
 }
 template <class T, std::size_t N>
-T kmillet::any_cast(kmillet::sized_any<N>&& operand)
+inline T kmillet::any_cast(kmillet::sized_any<N>&& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(std::move(*casted));
     throw std::bad_any_cast{};
 }
 template <class T, std::size_t N>
-const T* kmillet::any_cast(const kmillet::sized_any<N>* operand) noexcept
+inline const T* kmillet::any_cast(const kmillet::sized_any<N>* operand) noexcept
 {
     if (!operand || operand->info != &(kmillet::sized_any_detail::info<std::decay_t<T>>)) return nullptr;
     if constexpr (kmillet::sized_any_detail::info<std::decay_t<T>>.needsAlloc(N))
@@ -787,7 +871,7 @@ const T* kmillet::any_cast(const kmillet::sized_any<N>* operand) noexcept
     else return reinterpret_cast<const T*>(operand->buff.data());
 }
 template <class T, std::size_t N>
-T* kmillet::any_cast(kmillet::sized_any<N>* operand) noexcept
+inline T* kmillet::any_cast(kmillet::sized_any<N>* operand) noexcept
 {
     if (!operand || operand->info != &(kmillet::sized_any_detail::info<std::decay_t<T>>)) return nullptr;
     if constexpr (kmillet::sized_any_detail::info<std::decay_t<T>>.needsAlloc(N))
@@ -798,32 +882,32 @@ T* kmillet::any_cast(kmillet::sized_any<N>* operand) noexcept
 }
 
 template <std::size_t N, class T, class... Args>
-kmillet::sized_any<N> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...}))
+inline kmillet::sized_any<N> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...}))
 {
     return kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...};
 }
 template <std::size_t N, class T, class U, class... Args>
-kmillet::sized_any<N> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...}))
+inline kmillet::sized_any<N> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...}))
 {
     return kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...};
 }
 template<class T, class... Args>
-kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)))
+inline kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)))
 {
     return kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...);
 }
 template<class T, class U, class... Args>
-kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)))
+inline kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)))
 {
     return kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...);
 }
 template <class T, class... Args>
-kmillet::any kmillet::make_any(Args &&...args) noexcept(noexcept(kmillet::make_sized_any<kmillet::any::capacity(), T>(std::forward<Args>(args)...)))
+inline kmillet::any kmillet::make_any(Args &&...args) noexcept(noexcept(kmillet::make_sized_any<kmillet::any::capacity(), T>(std::forward<Args>(args)...)))
 {
     return kmillet::make_sized_any<kmillet::any::capacity(), T>(std::forward<Args>(args)...);
 }
 template <class T, class U, class... Args>
-kmillet::any kmillet::make_any(std::initializer_list<U> il, Args &&...args) noexcept(noexcept(kmillet::make_sized_any<kmillet::any::capacity(), T>(il, std::forward<Args>(args)...)))
+inline kmillet::any kmillet::make_any(std::initializer_list<U> il, Args &&...args) noexcept(noexcept(kmillet::make_sized_any<kmillet::any::capacity(), T>(il, std::forward<Args>(args)...)))
 {
     return kmillet::make_sized_any<kmillet::any::capacity(), T>(il, std::forward<Args>(args)...);
 }
