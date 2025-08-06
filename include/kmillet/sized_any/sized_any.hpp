@@ -369,7 +369,7 @@ namespace kmillet
 
     /**
      * @brief Constructs a `kmillet::sized_any<N>` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * @tparam N The size of the buffer used for in-place storage.
+     * @tparam N The size of the buffer used for in-place storage. Must be at least the size of a pointer.
      * @tparam T The type of the value to be stored.
      * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
      * @param args The arguments to be forwarded to the constructor of `T`.
@@ -377,10 +377,11 @@ namespace kmillet
      * @details Equivalent to `return kmillet::sized_any<N>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<std::size_t N, class T, class... Args>
+    requires(N >= sizeof(void*))
     sized_any<N> make_sized_any(Args&&... args) noexcept(noexcept(sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...}));
     /**
      * @brief Constructs a `kmillet::sized_any<N>` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * @tparam N The size of the buffer used for in-place storage.
+     * @tparam N The size of the buffer used for in-place storage. Must be at least the size of a pointer.
      * @tparam T The type of the value to be stored.
      * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
      * @param il The initializer list to be used for constructing the object.
@@ -389,32 +390,35 @@ namespace kmillet
      * @details Equivalent to `return kmillet::sized_any<N>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<std::size_t N, class T, class U, class... Args>
+    requires(N >= sizeof(void*))
     sized_any<N> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...}));
 
     /**
      * @brief Constructs a `kmillet::sized_any` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * The capacity of the constructed and returned `kmillet::sized_any` is exactly big enough to hold the `T` instance.
+     * The capacity of the constructed and returned `kmillet::sized_any` is the smallest valid capacity that can hold the `T` instance.
      * @tparam T The type of the value to be stored.
      * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
      * @param args The arguments to be forwarded to the constructor of `T`.
-     * @return A `kmillet::sized_any<sizeof(std::decay_t<T>)>` object containing an object of type `T`, constructed with the provided arguments.
-     * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(std::in_place_type<T>, std::forward<Args>(args)...);`
+     * @return A `kmillet::sized_any<N>` object containing an object of type `T`, constructed with the provided arguments, where `N`
+     * is the smallest valid capacity for a `kmillet::sized_any` specialization that can hold `T`.
+     * @details Equivalent to `return kmillet::sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*))>(std::in_place_type<T>, std::forward<Args>(args)...);`
      */
     template<class T, class... Args>
-    sized_any<sizeof(std::decay_t<T>)> make_sized_any(Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)));
+    sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*))> make_sized_any(Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*)), T>(std::forward<Args>(args)...)));
     /**
      * @brief Constructs a `kmillet::sized_any` object containing an object of type `T`, passing the provided arguments to `T`'s constructor.
-     * The capacity of the constructed and returned `kmillet::sized_any` is exactly big enough to hold the `T` instance.
+     * The capacity of the constructed and returned `kmillet::sized_any` is the smallest valid capacity that can hold the `T` instance.
      * @tparam T The type of the value to be stored.
      * @tparam U The type of the elements in the initializer list.
      * @tparam Args The types of the arguments to be forwarded to the constructor of `T`.
      * @param il The initializer list to be used for constructing the object.
      * @param args The arguments to be forwarded to the constructor of `T`.
-     * @return A `kmillet::sized_any<sizeof(std::decay_t<T>)>` object containing an object of type `T`, constructed with the provided arguments.
-     * @details Equivalent to `return kmillet::sized_any<sizeof(std::decay_t<T>)>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
+     * @return A `kmillet::sized_any<N>` object containing an object of type `T`, constructed with the provided arguments, where `N`
+     * is the smallest valid capacity for a `kmillet::sized_any` specialization that can hold `T`.
+     * @details Equivalent to `return kmillet::sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*))>(std::in_place_type<T>, il, std::forward<Args>(args)...);`
      */
     template<class T, class U, class... Args>
-    sized_any<sizeof(std::decay_t<T>)> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)));
+    sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*))> make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(::kmillet::make_sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*)), T>(il, std::forward<Args>(args)...)));
 
     /**
      * @brief An alias for a `kmillet::sized_any<N>` where `N` is equal to the internal buffer size of `std::any`.
@@ -882,24 +886,26 @@ inline T* kmillet::any_cast(kmillet::sized_any<N>* operand) noexcept
 }
 
 template <std::size_t N, class T, class... Args>
+requires(N >= sizeof(void*))
 inline kmillet::sized_any<N> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...}))
 {
     return kmillet::sized_any<N>{std::in_place_type<T>, std::forward<Args>(args)...};
 }
 template <std::size_t N, class T, class U, class... Args>
+requires(N >= sizeof(void*))
 inline kmillet::sized_any<N> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...}))
 {
     return kmillet::sized_any<N>{std::in_place_type<T>, il, std::forward<Args>(args)...};
 }
 template<class T, class... Args>
-inline kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...)))
+inline kmillet::sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*))> kmillet::make_sized_any(Args&&... args) noexcept(noexcept(kmillet::make_sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*)), T>(std::forward<Args>(args)...)))
 {
-    return kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(std::forward<Args>(args)...);
+    return kmillet::make_sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*)), T>(std::forward<Args>(args)...);
 }
 template<class T, class U, class... Args>
-inline kmillet::sized_any<sizeof(std::decay_t<T>)> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...)))
+inline kmillet::sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*))> kmillet::make_sized_any(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::make_sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*)), T>(il, std::forward<Args>(args)...)))
 {
-    return kmillet::make_sized_any<sizeof(std::decay_t<T>), T>(il, std::forward<Args>(args)...);
+    return kmillet::make_sized_any<std::max(sizeof(std::decay_t<T>), sizeof(void*)), T>(il, std::forward<Args>(args)...);
 }
 template <class T, class... Args>
 inline kmillet::any kmillet::make_any(Args &&...args) noexcept(noexcept(kmillet::make_sized_any<kmillet::any::capacity(), T>(std::forward<Args>(args)...)))

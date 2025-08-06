@@ -24,14 +24,16 @@ TEST(SizedAnyTest, Int)
     EXPECT_TRUE(a.has_value());
     EXPECT_EQ(a.type(), typeid(int));
     EXPECT_EQ(any_cast<int>(a), 42);
+    EXPECT_EQ(a.capacity(), 32);
 }
 
 TEST(SizedAnyTest, String)
 {
-    sized_any<64> a = std::string("hello world!");
+    auto a = kmillet::make_sized_any<64, std::string>("hello world!");
     EXPECT_TRUE(a.has_value());
     EXPECT_EQ(a.type(), typeid(std::string));
     EXPECT_EQ(any_cast<const std::string&>(a), "hello world!");
+    EXPECT_EQ(a.capacity(), 64);
 }
 
 TEST(SizedAnyTest, Move)
@@ -88,4 +90,23 @@ TEST(SizedAnyTest, BadCast)
 TEST(SizedAnyTest, AnyAlias)
 {
     EXPECT_TRUE(sizeof(any) == sizeof(std::any));
+    auto a = kmillet::make_any<std::string>("test");
+    EXPECT_TRUE(a.has_value());
+    EXPECT_EQ(a.type(), typeid(std::string));
+    EXPECT_EQ(any_cast<std::string>(a), "test");
+    EXPECT_TRUE(typeid(a) == typeid(kmillet::any));
+}
+
+TEST(SizedAnyTest, MakeSizedAnyToFit)
+{
+    // Test with a type that requires less space than a pointer
+    auto a = kmillet::make_sized_any<char>('a');
+    EXPECT_EQ(a.type(), typeid(char));
+    EXPECT_EQ(a.capacity(), sizeof(void*));
+
+    // Test with a type that requires more space than a pointer
+    struct MyStruct { void* x; void* y; };
+    auto b = kmillet::make_sized_any<MyStruct>();
+    EXPECT_EQ(b.type(), typeid(MyStruct));
+    EXPECT_EQ(b.capacity(), sizeof(MyStruct));
 }
