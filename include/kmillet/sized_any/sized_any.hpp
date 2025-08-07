@@ -170,11 +170,11 @@ namespace kmillet
          * @brief Constructs an object with initial content of type `std::decay_t<ValueType>`, direct-initialized from `std::forward<ValueType>(value)`.
          * @tparam ValueType The type of the value to be stored.
          * @param value The value to be stored.
-         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `std::in_place_type_t`, and is copy-constructible.
+         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any`, nor a `std::any`, nor a specialization of `std::in_place_type_t`, and is copy-constructible.
          * Noexcept so long as constructing `std::decay_t<ValueType>` from `std::forward<ValueType>(value)` is noexcept and `kmillet::sized_any_optimized<ValueType, N>` is satisfied.
          */
         template<class ValueType>
-        requires(std::conjunction_v<std::negation<details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<details::sized_any::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+        requires(std::conjunction_v<std::negation<details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<std::is_same<std::decay_t<ValueType>, std::any>>, std::negation<details::sized_any::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
         sized_any(ValueType&& value) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, ValueType> && sized_any_optimized<ValueType, N>);
         /**
          * @brief Constructs an object with initial content of type `std::decay_t<ValueType>`, direct-non-list-initialized from `std::forward<Args>(args)...`.
@@ -245,10 +245,10 @@ namespace kmillet
          * @tparam ValueType The type of the value to be assigned.
          * @param rhs The value to be assigned.
          * @return A reference to `*this`.
-         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `std::in_place_type_t`, and is copy-constructible.
+         * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a `std::any`, and is copy-constructible.
          */
         template<class ValueType>
-        requires(std::conjunction_v<std::negation<details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+        requires(std::conjunction_v<std::negation<details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<std::is_same<std::decay_t<ValueType>, std::any>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
         sized_any& operator=(ValueType&& rhs) noexcept(noexcept(sized_any{std::forward<ValueType>(rhs)}));
 
         /**
@@ -685,7 +685,7 @@ inline kmillet::sized_any<N>::sized_any(kmillet::sized_any<M>&& other) noexcept(
 }
 template <std::size_t N>
 template <class ValueType>
-requires(std::conjunction_v<std::negation<kmillet::details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<kmillet::details::sized_any::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+requires(std::conjunction_v<std::negation<kmillet::details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<std::is_same<std::decay_t<ValueType>, std::any>>, std::negation<kmillet::details::sized_any::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
 inline kmillet::sized_any<N>::sized_any(ValueType&& value) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, ValueType> && kmillet::sized_any_optimized<ValueType, N>)
     : info(&(kmillet::details::sized_any::info<std::decay_t<ValueType>>))
 {
@@ -756,7 +756,7 @@ inline kmillet::sized_any<N>& kmillet::sized_any<N>::operator=(kmillet::sized_an
 }
 template <std::size_t N>
 template <class ValueType>
-requires(std::conjunction_v<std::negation<kmillet::details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+requires(std::conjunction_v<std::negation<kmillet::details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<std::is_same<std::decay_t<ValueType>, std::any>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
 inline kmillet::sized_any<N>& kmillet::sized_any<N>::operator=(ValueType&& rhs) noexcept(noexcept(kmillet::sized_any<N>{std::forward<ValueType>(rhs)}))
 {
     kmillet::sized_any<N>(std::forward<ValueType>(rhs)).swap(*this);
