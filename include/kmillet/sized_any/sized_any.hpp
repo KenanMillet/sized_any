@@ -41,33 +41,61 @@
 #include <kmillet/sized_any/config.hpp>
 #endif
 
-#include <any>
+#include <any>         // for any, in_place_type_t, in_place_type, bad_any_cast
 #include <array>
-#include <concepts>
+#include <concepts>    // for various concepts
+#include <type_traits> // for true_type, false_type, and various meta-functions
 #include <typeinfo>
-#include <cstddef>
+#include <cstddef>     // for size_t
+
+#ifndef KMILLET_IV_THROW_OR_ABORT
+
+#ifndef KMILLET_SIZED_ANY_NO_EXCEPTIONS
+#define KMILLET_SIZED_ANY_NO_EXCEPTIONS() 0
+#endif
+
+#if KMILLET_SIZED_ANY_NO_EXCEPTIONS()
+#include <cstdlib> // for abort
+#define KMILLET_SIZED_ANY_THROW_OR_ABORT() abort()
+#else
+#define KMILLET_SIZED_ANY_THROW_OR_ABORT() throw std::bad_any_cast{}
+#endif
+
+#endif
 
 #ifndef KMILLET_SIZED_ANY_NO_VIRTUAL
 #define KMILLET_SIZED_ANY_NO_VIRTUAL() 0
 #endif
 
+// Forward declaration of kmillet::sized_any
 namespace kmillet
 {
     template <std::size_t N> class sized_any;
+}
 
-    namespace sized_any_detail
-    {
-        template<class T> struct is_sized_any : std::false_type {};
-        template<std::size_t N> struct is_sized_any<sized_any<N>> : std::true_type {};
+// Private utilities for kmillet::sized_any
+namespace kmillet::details::sized_any
+{
+    // Used to exclude `ValueType` versions of `kmillet::sized_any<N>` constructors and assignment operators
+    // from overload resolution when the `ValueType` argument is a specialization of `kmillet::sized_any`.
+    template<class T> struct is_sized_any : std::false_type {};
+    template<std::size_t N> struct is_sized_any<::kmillet::sized_any<N>> : std::true_type {};
 
-        template<class T> struct is_in_place_type : std::false_type {};
-        template<class T> struct is_in_place_type<std::in_place_type_t<T>> : std::true_type {};
+    // Used to exclude `ValueType` versions of `kmillet::sized_any<N>` constructors
+    // from overload resolution when the `ValueType` argument is a specialization of `std::in_place_type_t`.
+    template<class T> struct is_in_place_type : std::false_type {};
+    template<class T> struct is_in_place_type<std::in_place_type_t<T>> : std::true_type {};
 
-        struct ITypeInfo;
-        template<class T> struct TypeInfo;
-        template<class T> inline constexpr TypeInfo<T> info{};
-    }
+    // Interface that `kmillet::sized_any` specializations use to store type information
+    // and check if dynamic allocation is needed.
+    struct ITypeInfo;
+    // Implementation of `ITypeInfo` for a given type `T`.
+    template<class T> struct TypeInfo;
+    template<class T> inline constexpr TypeInfo<T> info{};
+}
 
+namespace kmillet
+{
     /**
      * @brief The concept `kmillet::sized_any_optimized<T, N>` is satisfied if and only if a
      *        `kmillet::sized_any<N>` will not perform dynamic allocation to hold an object of type `std::decay_t<T>`.
@@ -77,7 +105,7 @@ namespace kmillet
      * @tparam N The size of the buffer.
      */
     template<class T, std::size_t N>
-    concept sized_any_optimized = !sized_any_detail::info<std::decay_t<T>>.NeedsAlloc(N);
+    concept sized_any_optimized = !details::sized_any::info<std::decay_t<T>>.NeedsAlloc(N);
 
     /**
      * @brief A type-erased container similar to `std::any`, but with a template-sized buffer for in-place allocation.
@@ -146,7 +174,7 @@ namespace kmillet
          * Noexcept so long as constructing `std::decay_t<ValueType>` from `std::forward<ValueType>(value)` is noexcept and `kmillet::sized_any_optimized<ValueType, N>` is satisfied.
          */
         template<class ValueType>
-        requires(std::conjunction_v<std::negation<sized_any_detail::is_sized_any<std::decay_t<ValueType>>>, std::negation<sized_any_detail::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+        requires(std::conjunction_v<std::negation<details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<details::sized_any::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
         sized_any(ValueType&& value) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, ValueType> && sized_any_optimized<ValueType, N>);
         /**
          * @brief Constructs an object with initial content of type `std::decay_t<ValueType>`, direct-non-list-initialized from `std::forward<Args>(args)...`.
@@ -220,7 +248,7 @@ namespace kmillet
          * @details Requires that `std::decay_t<ValueType>` is not a specialization of `kmillet::sized_any` nor a specialization of `std::in_place_type_t`, and is copy-constructible.
          */
         template<class ValueType>
-        requires(std::conjunction_v<std::negation<sized_any_detail::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+        requires(std::conjunction_v<std::negation<details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
         sized_any& operator=(ValueType&& rhs) noexcept(noexcept(sized_any{std::forward<ValueType>(rhs)}));
 
         /**
@@ -301,7 +329,7 @@ namespace kmillet
         friend T* any_cast(sized_any<M>* operand) noexcept;
 
     // Member variables
-        const sized_any_detail::ITypeInfo* info;
+        const details::sized_any::ITypeInfo* info;
         std::array<char, N> buff;
     };
 
@@ -465,39 +493,39 @@ namespace kmillet
 // ----------------------------------------------------------------------------
 
 #if KMILLET_SIZED_ANY_NO_VIRTUAL()
-struct kmillet::sized_any_detail::ITypeInfo
+struct kmillet::details::sized_any::ITypeInfo
 {
     const std::type_info& (* const type) () noexcept;
     std::size_t (* const size) () noexcept;
     bool (* const needsAlloc) (std::size_t cap) noexcept;
     void (* const copy) (const void* from, char* to, std::size_t fromCap, std::size_t toCap);
     void (* const move) (void* from, char* to, std::size_t fromCap, std::size_t toCap);
-    void (* const destroy) (char* buff, std::size_t cap) noexcept;
-    void (* const del) (void* buff, std::size_t cap) noexcept;
+    void (* const destructReuseHeap) (void* buff) noexcept;
+    void (* const cleanUp) (void* buff, std::size_t cap) noexcept;
 };
 #else
-struct kmillet::sized_any_detail::ITypeInfo
+struct kmillet::details::sized_any::ITypeInfo
 {
     virtual constexpr const std::type_info& type() const noexcept = 0;
     virtual constexpr std::size_t size() const noexcept = 0;
     virtual constexpr bool needsAlloc(std::size_t cap) const noexcept = 0;
     virtual void copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap) const = 0;
     virtual void move(void* from, char* to, std::size_t fromCap, std::size_t toCap) const = 0;
-    virtual void destroy(char* buff, std::size_t cap) const noexcept = 0;
-    virtual void del(void* buff, std::size_t cap) const noexcept = 0;
+    virtual void destructReuseHeap(void* buff) const noexcept = 0;
+    virtual void cleanUp(void* buff, std::size_t cap) const noexcept = 0;
 };
 #endif
 
 template<class T>
-struct kmillet::sized_any_detail::TypeInfo final : kmillet::sized_any_detail::ITypeInfo
+struct kmillet::details::sized_any::TypeInfo final : kmillet::details::sized_any::ITypeInfo
 {
     static constexpr const std::type_info& Type() noexcept;
     static constexpr std::size_t Size() noexcept;
     static constexpr bool NeedsAlloc(std::size_t cap) noexcept;
     static void Copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap);
     static void Move(void* from, char* to, std::size_t fromCap, std::size_t toCap);
-    static void Destroy(char* buff, std::size_t cap) noexcept;
-    static void Del(void* buff, std::size_t cap) noexcept;
+    static void DestructReuseHeap(void* buff) noexcept;
+    static void CleanUp(void* buff, std::size_t cap) noexcept;
 #if KMILLET_SIZED_ANY_NO_VIRTUAL()
     constexpr TypeInfo() noexcept
         : ITypeInfo{.type=&Type,
@@ -505,8 +533,8 @@ struct kmillet::sized_any_detail::TypeInfo final : kmillet::sized_any_detail::IT
                     .needsAlloc=&NeedsAlloc,
                     .copy=&Copy,
                     .move=&Move,
-                    .destroy=&Destroy,
-                    .del=&Del}
+                    .destructReuseHeap=&DestructReuseHeap,
+                    .cleanUp=&CleanUp}
     {}
 #else
     constexpr const std::type_info& type() const noexcept override { return Type(); }
@@ -514,64 +542,64 @@ struct kmillet::sized_any_detail::TypeInfo final : kmillet::sized_any_detail::IT
     constexpr bool needsAlloc(std::size_t cap) const noexcept override { return NeedsAlloc(cap); }
     void copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap) const override { return Copy(from, to, fromCap, toCap); }
     void move(void* from, char* to, std::size_t fromCap, std::size_t toCap) const override { return Move(from, to, fromCap, toCap); }
-    void destroy(char* buff, std::size_t cap) const noexcept override { return Destroy(buff, cap); }
-    void del(void* buff, std::size_t cap) const noexcept override { return Del(buff, cap); }
+    void destructReuseHeap(void* buff) const noexcept override { return DestructReuseHeap(buff); }
+    void cleanUp(void* buff, std::size_t cap) const noexcept override { return CleanUp(buff, cap); }
 #endif
 };
 
 template<>
-inline constexpr const std::type_info& kmillet::sized_any_detail::TypeInfo<void>::Type() noexcept
+inline constexpr const std::type_info& kmillet::details::sized_any::TypeInfo<void>::Type() noexcept
 {
     return typeid(void);
 }
 template<>
-inline constexpr std::size_t kmillet::sized_any_detail::TypeInfo<void>::Size() noexcept
+inline constexpr std::size_t kmillet::details::sized_any::TypeInfo<void>::Size() noexcept
 {
     return 0;
 }
 template<>
-inline constexpr bool kmillet::sized_any_detail::TypeInfo<void>::NeedsAlloc(std::size_t cap) noexcept
+inline constexpr bool kmillet::details::sized_any::TypeInfo<void>::NeedsAlloc(std::size_t cap) noexcept
 {
     return false;
 }
 template<>
-inline void kmillet::sized_any_detail::TypeInfo<void>::Copy(const void*, char*, std::size_t, std::size_t)
+inline void kmillet::details::sized_any::TypeInfo<void>::Copy(const void*, char*, std::size_t, std::size_t)
 {
     // No operation needed for void type
 }
 template<>
-inline void kmillet::sized_any_detail::TypeInfo<void>::Move(void*, char*, std::size_t, std::size_t)
+inline void kmillet::details::sized_any::TypeInfo<void>::Move(void*, char*, std::size_t, std::size_t)
 {
     // No operation needed for void type
 }
 template<>
-inline void kmillet::sized_any_detail::TypeInfo<void>::Destroy(char*, std::size_t) noexcept
+inline void kmillet::details::sized_any::TypeInfo<void>::DestructReuseHeap(void*) noexcept
 {
     // No operation needed for void type
 }
 template<>
-inline void kmillet::sized_any_detail::TypeInfo<void>::Del(void*, std::size_t) noexcept
+inline void kmillet::details::sized_any::TypeInfo<void>::CleanUp(void*, std::size_t) noexcept
 {
     // No operation needed for void type
 }
 
-template<class T>
-inline constexpr const std::type_info& kmillet::sized_any_detail::TypeInfo<T>::Type() noexcept
+template <class T>
+inline constexpr const std::type_info& kmillet::details::sized_any::TypeInfo<T>::Type() noexcept
 {
     return typeid(T);
 }
 template<class T>
-inline constexpr std::size_t kmillet::sized_any_detail::TypeInfo<T>::Size() noexcept
+inline constexpr std::size_t kmillet::details::sized_any::TypeInfo<T>::Size() noexcept
 {
     return sizeof(T);
 }
 template<class T>
-inline constexpr bool kmillet::sized_any_detail::TypeInfo<T>::NeedsAlloc(std::size_t cap) noexcept
+inline constexpr bool kmillet::details::sized_any::TypeInfo<T>::NeedsAlloc(std::size_t cap) noexcept
 {
     return sizeof(T) > cap || !std::is_nothrow_move_constructible_v<T>;
 }
 template<class T>
-inline void kmillet::sized_any_detail::TypeInfo<T>::Copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap)
+inline void kmillet::details::sized_any::TypeInfo<T>::Copy(const void* from, char* to, std::size_t fromCap, std::size_t toCap)
 {
     if (NeedsAlloc(toCap))
     {
@@ -588,7 +616,7 @@ inline void kmillet::sized_any_detail::TypeInfo<T>::Copy(const void* from, char*
     else new (to) T(*reinterpret_cast<const T*>(from));
 }
 template<class T>
-inline void kmillet::sized_any_detail::TypeInfo<T>::Move(void* from, char* to, std::size_t fromCap, std::size_t toCap)
+inline void kmillet::details::sized_any::TypeInfo<T>::Move(void* from, char* to, std::size_t fromCap, std::size_t toCap)
 {
     if (NeedsAlloc(toCap))
     {
@@ -602,21 +630,19 @@ inline void kmillet::sized_any_detail::TypeInfo<T>::Move(void* from, char* to, s
     else if (NeedsAlloc(fromCap))
     {
         new (to) T(std::move(**reinterpret_cast<T**>(from)));
+        delete *reinterpret_cast<T**>(from);
+        return;
     }
     else new (to) T(std::move(*reinterpret_cast<T*>(from)));
-    Del(from, fromCap);
+    reinterpret_cast<T*>(from)->~T();
 }
 template<class T>
-inline void kmillet::sized_any_detail::TypeInfo<T>::Destroy(char* buff, std::size_t cap) noexcept
+inline void kmillet::details::sized_any::TypeInfo<T>::DestructReuseHeap(void* buff) noexcept
 {
-    if (NeedsAlloc(cap))
-    {
-        (*reinterpret_cast<T**>(buff))->~T();
-    }
-    else reinterpret_cast<T*>(buff)->~T();
+    (*reinterpret_cast<T**>(buff))->~T();
 }
 template<class T>
-inline void kmillet::sized_any_detail::TypeInfo<T>::Del(void* buff, std::size_t cap) noexcept
+inline void kmillet::details::sized_any::TypeInfo<T>::CleanUp(void* buff, std::size_t cap) noexcept
 {
     if (NeedsAlloc(cap))
     {
@@ -627,7 +653,7 @@ inline void kmillet::sized_any_detail::TypeInfo<T>::Del(void* buff, std::size_t 
 
 template <std::size_t N>
 inline constexpr kmillet::sized_any<N>::sized_any() noexcept
-    : info(&(kmillet::sized_any_detail::info<void>))
+    : info(&(kmillet::details::sized_any::info<void>))
 {}
 template <std::size_t N>
 inline kmillet::sized_any<N>::sized_any(const kmillet::sized_any<N>& other)
@@ -647,7 +673,7 @@ inline kmillet::sized_any<N>::sized_any(kmillet::sized_any<N>&& other) noexcept
     : info(other.info)
 {
     info->move(other.buff.data(), buff.data(), N, N);
-    other.info = &(kmillet::sized_any_detail::info<void>);
+    other.info = &(kmillet::details::sized_any::info<void>);
 }
 template <std::size_t N>
 template<std::size_t M>
@@ -655,15 +681,15 @@ inline kmillet::sized_any<N>::sized_any(kmillet::sized_any<M>&& other) noexcept(
     : info(other.info)
 {
     info->move(other.buff.data(), buff.data(), M, N);
-    other.info = &(kmillet::sized_any_detail::info<void>);
+    other.info = &(kmillet::details::sized_any::info<void>);
 }
 template <std::size_t N>
 template <class ValueType>
-requires(std::conjunction_v<std::negation<kmillet::sized_any_detail::is_sized_any<std::decay_t<ValueType>>>, std::negation<kmillet::sized_any_detail::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+requires(std::conjunction_v<std::negation<kmillet::details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::negation<kmillet::details::sized_any::is_in_place_type<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
 inline kmillet::sized_any<N>::sized_any(ValueType&& value) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, ValueType> && kmillet::sized_any_optimized<ValueType, N>)
-    : info(&(kmillet::sized_any_detail::info<std::decay_t<ValueType>>))
+    : info(&(kmillet::details::sized_any::info<std::decay_t<ValueType>>))
 {
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.NeedsAlloc(N))
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<ValueType>>.NeedsAlloc(N))
     {
         *reinterpret_cast<void**>(buff.data()) = new std::decay_t<ValueType>(std::forward<ValueType>(value));
     }
@@ -673,9 +699,9 @@ template <std::size_t N>
 template <class ValueType, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, Args...>)
 inline kmillet::sized_any<N>::sized_any(std::in_place_type_t<ValueType>, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, Args...> && kmillet::sized_any_optimized<ValueType, N>)
-    : info(&(kmillet::sized_any_detail::info<std::decay_t<ValueType>>))
+    : info(&(kmillet::details::sized_any::info<std::decay_t<ValueType>>))
 {
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.NeedsAlloc(N))
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<ValueType>>.NeedsAlloc(N))
     {
         *reinterpret_cast<void**>(buff.data()) = new std::decay_t<ValueType>(std::forward<Args>(args)...);
     }
@@ -685,9 +711,9 @@ template <std::size_t N>
 template <class ValueType, class U, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, std::initializer_list<U>&, Args...>)
 inline kmillet::sized_any<N>::sized_any(std::in_place_type_t<ValueType>, std::initializer_list<U> il, Args&&... args) noexcept(std::is_nothrow_constructible_v<std::decay_t<ValueType>, std::initializer_list<U>&, Args...> && kmillet::sized_any_optimized<ValueType, N>)
-    : info(&(kmillet::sized_any_detail::info<std::decay_t<ValueType>>))
+    : info(&(kmillet::details::sized_any::info<std::decay_t<ValueType>>))
 {
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.NeedsAlloc(N))
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<ValueType>>.NeedsAlloc(N))
     {
         *reinterpret_cast<void**>(buff.data()) = new std::decay_t<ValueType>(il, std::forward<Args>(args)...);
     }
@@ -730,7 +756,7 @@ inline kmillet::sized_any<N>& kmillet::sized_any<N>::operator=(kmillet::sized_an
 }
 template <std::size_t N>
 template <class ValueType>
-requires(std::conjunction_v<std::negation<kmillet::sized_any_detail::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
+requires(std::conjunction_v<std::negation<kmillet::details::sized_any::is_sized_any<std::decay_t<ValueType>>>, std::is_copy_constructible<std::decay_t<ValueType>>>)
 inline kmillet::sized_any<N>& kmillet::sized_any<N>::operator=(ValueType&& rhs) noexcept(noexcept(kmillet::sized_any<N>{std::forward<ValueType>(rhs)}))
 {
     kmillet::sized_any<N>(std::forward<ValueType>(rhs)).swap(*this);
@@ -742,26 +768,26 @@ template <class ValueType, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, Args...>)
 inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<ValueType>, std::forward<Args>(args)...}))
 {
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.NeedsAlloc(N))
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<ValueType>>.NeedsAlloc(N))
     {
-        if (info->needsAlloc(N) && info->size() == kmillet::sized_any_detail::info<std::decay_t<ValueType>>.Size())
+        if (info->needsAlloc(N) && info->size() == kmillet::details::sized_any::info<std::decay_t<ValueType>>.Size())
         {
-            info->destroy(buff.data(), N);
+            info->destructReuseHeap(buff.data());
             new (*reinterpret_cast<void**>(buff.data())) std::decay_t<ValueType>(std::forward<Args>(args)...);
         }
         else
         {
-            info->del(buff.data(), N);
+            info->cleanUp(buff.data(), N);
             *reinterpret_cast<void**>(buff.data()) = new std::decay_t<ValueType>(std::forward<Args>(args)...);
         }
-        info = &(kmillet::sized_any_detail::info<std::decay_t<ValueType>>);
+        info = &(kmillet::details::sized_any::info<std::decay_t<ValueType>>);
         return **reinterpret_cast<std::decay_t<ValueType>**>(buff.data());
     }
     else
     {
-        info->del(buff.data(), N);
+        info->cleanUp(buff.data(), N);
         new (buff.data()) std::decay_t<ValueType>(std::forward<Args>(args)...);
-        info = &(kmillet::sized_any_detail::info<std::decay_t<ValueType>>);
+        info = &(kmillet::details::sized_any::info<std::decay_t<ValueType>>);
         return *reinterpret_cast<std::decay_t<ValueType>*>(buff.data());
     }
 }
@@ -770,26 +796,26 @@ template<class ValueType, class U, class... Args>
 requires(std::copy_constructible<std::decay_t<ValueType>> && std::constructible_from<std::decay_t<ValueType>, std::initializer_list<U>&, Args...>)
 inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(std::initializer_list<U> il, Args&&... args) noexcept(noexcept(kmillet::sized_any<N>{std::in_place_type<ValueType>, il, std::forward<Args>(args)...}))
 {
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<ValueType>>.NeedsAlloc(N))
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<ValueType>>.NeedsAlloc(N))
     {
-        if (info->needsAlloc(N) && info->size() == kmillet::sized_any_detail::info<std::decay_t<ValueType>>.Size())
+        if (info->needsAlloc(N) && info->size() == kmillet::details::sized_any::info<std::decay_t<ValueType>>.Size())
         {
-            info->destroy(buff.data(), N);
+            info->destructReuseHeap(buff.data());
             new (*reinterpret_cast<void**>(buff.data())) std::decay_t<ValueType>(il, std::forward<Args>(args)...);
         }
         else
         {
-            info->del(buff.data(), N);
+            info->cleanUp(buff.data(), N);
             *reinterpret_cast<void**>(buff.data()) = new std::decay_t<ValueType>(il, std::forward<Args>(args)...);
         }
-        info = &(kmillet::sized_any_detail::info<std::decay_t<ValueType>>);
+        info = &(kmillet::details::sized_any::info<std::decay_t<ValueType>>);
         return **reinterpret_cast<std::decay_t<ValueType>**>(buff.data());
     }
     else
     {
-        info->del(buff.data(), N);
+        info->cleanUp(buff.data(), N);
         new (buff.data()) std::decay_t<ValueType>(il, std::forward<Args>(args)...);
-        info = &(kmillet::sized_any_detail::info<std::decay_t<ValueType>>);
+        info = &(kmillet::details::sized_any::info<std::decay_t<ValueType>>);
         return *reinterpret_cast<std::decay_t<ValueType>*>(buff.data());
     }
 }
@@ -797,9 +823,9 @@ inline std::decay_t<ValueType>& kmillet::sized_any<N>::emplace(std::initializer_
 template <std::size_t N>
 inline void kmillet::sized_any<N>::reset() noexcept
 {
-    if (info == &(kmillet::sized_any_detail::info<void>)) return;
-    info->del(buff.data(), N);
-    info = &(kmillet::sized_any_detail::info<void>);
+    if (info == &(kmillet::details::sized_any::info<void>)) return;
+    info->cleanUp(buff.data(), N);
+    info = &(kmillet::details::sized_any::info<void>);
 }
 template <std::size_t N>
 inline void kmillet::sized_any<N>::swap(kmillet::sized_any<N>& other) noexcept
@@ -835,7 +861,7 @@ inline void kmillet::sized_any<N>::swap(kmillet::sized_any<M>& other)
 template <std::size_t N>
 inline bool kmillet::sized_any<N>::has_value() const noexcept
 {
-    return info != &(kmillet::sized_any_detail::info<void>);
+    return info != &(kmillet::details::sized_any::info<void>);
 }
 template <std::size_t N>
 inline const std::type_info& kmillet::sized_any<N>::type() const noexcept
@@ -847,25 +873,25 @@ template <class T, std::size_t N>
 inline T kmillet::any_cast(const kmillet::sized_any<N>& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(*casted);
-    throw std::bad_any_cast{};
+    KMILLET_SIZED_ANY_THROW_OR_ABORT();
 }
 template <class T, std::size_t N>
 inline T kmillet::any_cast(kmillet::sized_any<N>& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(*casted);
-    throw std::bad_any_cast{};
+    KMILLET_SIZED_ANY_THROW_OR_ABORT();
 }
 template <class T, std::size_t N>
 inline T kmillet::any_cast(kmillet::sized_any<N>&& operand)
 {
     if (auto* casted = any_cast<std::remove_cvref_t<T>>(&operand)) return static_cast<T>(std::move(*casted));
-    throw std::bad_any_cast{};
+    KMILLET_SIZED_ANY_THROW_OR_ABORT();
 }
 template <class T, std::size_t N>
 inline const T* kmillet::any_cast(const kmillet::sized_any<N>* operand) noexcept
 {
-    if (!operand || operand->info != &(kmillet::sized_any_detail::info<std::decay_t<T>>)) return nullptr;
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<T>>.NeedsAlloc(N))
+    if (!operand || operand->info != &(kmillet::details::sized_any::info<std::decay_t<T>>)) return nullptr;
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<T>>.NeedsAlloc(N))
     {
         return *reinterpret_cast<const T**>(operand->buff.data());
     }
@@ -874,8 +900,8 @@ inline const T* kmillet::any_cast(const kmillet::sized_any<N>* operand) noexcept
 template <class T, std::size_t N>
 inline T* kmillet::any_cast(kmillet::sized_any<N>* operand) noexcept
 {
-    if (!operand || operand->info != &(kmillet::sized_any_detail::info<std::decay_t<T>>)) return nullptr;
-    if constexpr (kmillet::sized_any_detail::info<std::decay_t<T>>.NeedsAlloc(N))
+    if (!operand || operand->info != &(kmillet::details::sized_any::info<std::decay_t<T>>)) return nullptr;
+    if constexpr (kmillet::details::sized_any::info<std::decay_t<T>>.NeedsAlloc(N))
     {
         return *reinterpret_cast<T**>(operand->buff.data());
     }

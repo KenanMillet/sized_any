@@ -54,6 +54,12 @@ option(
 )
 
 option(
+    KMILLET_SIZED_ANY_NO_EXCEPTIONS
+    "Disable exceptions by replacing throw calls with abort. Default: OFF. Values: { ON, OFF }."
+    OFF
+)
+
+option(
     KMILLET_SIZED_ANY_NO_VIRTUAL
     "Disables virtual function calls by replacing internal abstract class with a function pointer table. Consider toggling this value if performance is below expectations. Default: OFF. Values: { ON, OFF }."
     OFF
